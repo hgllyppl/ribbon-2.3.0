@@ -153,12 +153,16 @@ public class LoadBalancerCommand<T> {
         return new Builder<T>();
     }
 
+    // 请求地址
     private final URI    loadBalancerURI;
     private final Object loadBalancerKey;
-    
+
+    // 负载均衡上下文
     private final LoadBalancerContext loadBalancerContext;
+    // 重试策略
     private final RetryHandler retryHandler;
     private volatile ExecutionInfo executionInfo;
+    // 所选节点
     private final Server server;
 
     private final ExecutionContextListenerInvoker<?, T> listenerInvoker;
@@ -172,10 +176,7 @@ public class LoadBalancerCommand<T> {
         this.server              = builder.server;
     }
     
-    /**
-     * Return an Observable that either emits only the single requested server
-     * or queries the load balancer for the next server on each subscription
-     */
+    // 使用 loadBalancerContext 选择节点
     private Observable<Server> selectServer() {
         return Observable.create(new OnSubscribe<Server>() {
             @Override
@@ -228,7 +229,8 @@ public class LoadBalancerCommand<T> {
         }
 
     }
-    
+
+    // 根据重试策略判定是否重试
     private Func2<Integer, Throwable, Boolean> retryPolicy(final int maxRetrys, final boolean same) {
         return new Func2<Integer, Throwable, Boolean>() {
             @Override
@@ -251,11 +253,7 @@ public class LoadBalancerCommand<T> {
     }
 
     /**
-     * Create an {@link Observable} that once subscribed execute network call asynchronously with a server chosen by load balancer.
-     * If there are any errors that are indicated as retriable by the {@link RetryHandler}, they will be consumed internally by the
-     * function and will not be observed by the {@link Observer} subscribed to the returned {@link Observable}. If number of retries has
-     * exceeds the maximal allowed, a final error will be emitted by the returned {@link Observable}. Otherwise, the first successful
-     * result during execution and retries will be emitted.
+     * 执行一个异步的负载均衡请求，如果请求失败将根据重试策略进行重试，如果没有配置重试策略将立即抛出异常
      */
     public Observable<T> submit(final ServerOperation<T> operation) {
         final ExecutionInfoContext context = new ExecutionInfoContext();
@@ -271,23 +269,23 @@ public class LoadBalancerCommand<T> {
         final int maxRetrysSame = retryHandler.getMaxRetriesOnSameServer();
         final int maxRetrysNext = retryHandler.getMaxRetriesOnNextServer();
 
-        // Use the load balancer
-        Observable<T> o = 
+        Observable<T> o =
+                // 选择节点
                 (server == null ? selectServer() : Observable.just(server))
                 .concatMap(new Func1<Server, Observable<T>>() {
                     @Override
-                    // Called for each server being selected
                     public Observable<T> call(Server server) {
                         context.setServer(server);
+                        // 获取节点状态
                         final ServerStats stats = loadBalancerContext.getServerStats(server);
                         
-                        // Called for each attempt and retry
                         Observable<T> o = Observable
                                 .just(server)
                                 .concatMap(new Func1<Server, Observable<T>>() {
                                     @Override
                                     public Observable<T> call(final Server server) {
                                         context.incAttemptCount();
+                                        // 标记请求开始
                                         loadBalancerContext.noteOpenConnection(stats);
                                         
                                         if (listenerInvoker != null) {
@@ -299,17 +297,20 @@ public class LoadBalancerCommand<T> {
                                         }
                                         
                                         final Stopwatch tracer = loadBalancerContext.getExecuteTracer().start();
-                                        
+
+                                        // 执行请求
                                         return operation.call(server).doOnEach(new Observer<T>() {
                                             private T entity;
                                             @Override
                                             public void onCompleted() {
+                                                // 标记请求结束
                                                 recordStats(tracer, stats, entity, null);
                                                 // TODO: What to do if onNext or onError are never called?
                                             }
 
                                             @Override
                                             public void onError(Throwable e) {
+                                                // 标记请求结束
                                                 recordStats(tracer, stats, null, e);
                                                 logger.debug("Got error {} when executed on server {}", e, server);
                                                 if (listenerInvoker != null) {
@@ -324,7 +325,8 @@ public class LoadBalancerCommand<T> {
                                                     listenerInvoker.onExecutionSuccess(entity, context.toExecutionInfo());
                                                 }
                                             }                            
-                                            
+
+                                            // 请求结束，修改节点状态
                                             private void recordStats(Stopwatch tracer, ServerStats stats, Object entity, Throwable exception) {
                                                 tracer.stop();
                                                 loadBalancerContext.noteRequestCompletion(stats, entity, exception, tracer.getDuration(TimeUnit.MILLISECONDS), retryHandler);
@@ -332,13 +334,15 @@ public class LoadBalancerCommand<T> {
                                         });
                                     }
                                 });
-                        
+
+                        // 配置重试策略
                         if (maxRetrysSame > 0) 
                             o = o.retry(retryPolicy(maxRetrysSame, true));
                         return o;
                     }
                 });
-            
+
+        // 配置重试策略
         if (maxRetrysNext > 0 && server == null) 
             o = o.retry(retryPolicy(maxRetrysNext, false));
         

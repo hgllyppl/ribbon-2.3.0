@@ -32,24 +32,24 @@ import com.netflix.loadbalancer.reactive.ServerOperation;
 
 /**
  * Abstract class that provides the integration of client with load balancers.
- * 
+ *
  * @author awang
  *
  */
 public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T extends IResponse> extends LoadBalancerContext implements IClient<S, T>, IClientConfigAware {
-    
+
     public AbstractLoadBalancerAwareClient(ILoadBalancer lb) {
         super(lb);
     }
-    
+
     /**
      * Delegate to {@link #initWithNiwsConfig(IClientConfig)}
      * @param clientConfig
      */
     public AbstractLoadBalancerAwareClient(ILoadBalancer lb, IClientConfig clientConfig) {
-        super(lb, clientConfig);        
+        super(lb, clientConfig);
     }
-    
+
     /**
      * Determine if an exception should contribute to circuit breaker trip. If such exceptions happen consecutively
      * on a server, it will be deemed as circuit breaker tripped and enter into a time out when it will be
@@ -62,31 +62,31 @@ public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T
         }
         return false;
     }
-        
+
     /**
-     * Determine if operation can be retried if an exception is thrown. For example, connect 
+     * Determine if operation can be retried if an exception is thrown. For example, connect
      * timeout related exceptions
      * are typically retriable.
-     * 
+     *
      */
     @Deprecated
     protected boolean isRetriableException(Throwable e) {
         if (getRetryHandler() != null) {
             return getRetryHandler().isRetriableException(e, true);
-        } 
+        }
         return false;
     }
-    
+
     public T executeWithLoadBalancer(S request) throws ClientException {
         return executeWithLoadBalancer(request, null);
     }
 
     /**
      * This method should be used when the caller wants to dispatch the request to a server chosen by
-     * the load balancer, instead of specifying the server in the request's URI. 
+     * the load balancer, instead of specifying the server in the request's URI.
      * It calculates the final URI by calling {@link #reconstructURIWithServer(com.netflix.loadbalancer.Server, java.net.URI)}
      * and then calls {@link #executeWithLoadBalancer(ClientRequest, com.netflix.client.config.IClientConfig)}.
-     * 
+     *
      * @param request request to be dispatched to a server chosen by the load balancer. The URI can be a partial
      * URI which does not contain the host name or the protocol.
      */
@@ -98,11 +98,16 @@ public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T
                 new ServerOperation<T>() {
                     @Override
                     public Observable<T> call(Server server) {
+                        // 构造完整的url
                         URI finalUri = reconstructURIWithServer(server, request.getUri());
                         S requestForServer = (S) request.replaceUri(finalUri);
                         try {
+                            /**
+                             * 真·执行请求
+                             * @see org.springframework.cloud.openfeign.ribbon.FeignLoadBalancer#execute
+                             */
                             return Observable.just(AbstractLoadBalancerAwareClient.this.execute(requestForServer, requestConfig));
-                        } 
+                        }
                         catch (Exception e) {
                             return Observable.error(e);
                         }
@@ -118,11 +123,15 @@ public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T
                 throw new ClientException(e);
             }
         }
-        
+
     }
-    
+
+    /**
+     * @see org.springframework.cloud.openfeign.ribbon.FeignLoadBalancer#getRequestSpecificRetryHandler
+     */
     public abstract RequestSpecificRetryHandler getRequestSpecificRetryHandler(S request, IClientConfig requestConfig);
 
+    // 构建 LoadBalancerCommand 以执行请求
     protected LoadBalancerCommand<T> buildLoadBalancerCommand(final S request, final IClientConfig config) {
 		RequestSpecificRetryHandler handler = getRequestSpecificRetryHandler(request, config);
 		LoadBalancerCommand.Builder<T> builder = LoadBalancerCommand.<T>builder()
@@ -141,7 +150,7 @@ public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T
     @Deprecated
     protected boolean isRetriable(S request) {
         if (request.isRetriable()) {
-            return true;            
+            return true;
         } else {
             boolean retryOkayOnOperation = okToRetryOnAllOperations;
             IClientConfig overriddenClientConfig = request.getOverrideConfig();
@@ -151,7 +160,7 @@ public abstract class AbstractLoadBalancerAwareClient<S extends ClientRequest, T
             return retryOkayOnOperation;
         }
     }
-    
+
 }
 
 

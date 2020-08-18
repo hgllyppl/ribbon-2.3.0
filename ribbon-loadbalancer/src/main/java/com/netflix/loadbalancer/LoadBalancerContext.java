@@ -569,6 +569,7 @@ public class LoadBalancerContext implements IClientConfigAware {
         return new Server(host, port);
     }
 
+    // 将节点的地址构造到 url 中
     public URI reconstructURIWithServer(Server server, URI original) {
         String host = server.getHost();
         int port = server.getPort();

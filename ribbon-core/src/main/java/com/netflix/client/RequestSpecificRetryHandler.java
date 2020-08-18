@@ -18,14 +18,21 @@ import com.netflix.client.config.IClientConfig;
  */
 public class RequestSpecificRetryHandler implements RetryHandler {
 
+    /**
+     * default
+     * @see DefaultLoadBalancerRetryHandler
+     */
     private final RetryHandler fallback;
+    // 同一节点重试次数
     private int retrySameServer = -1;
+    // 重试几个不同的节点
     private int retryNextServer = -1;
+    // 是否在连接异常上重试
     private final boolean okToRetryOnConnectErrors;
+    // 是否在所有操作上重试
     private final boolean okToRetryOnAllErrors;
     
-    protected List<Class<? extends Throwable>> connectionRelated = 
-            Lists.<Class<? extends Throwable>>newArrayList(SocketException.class);
+    protected List<Class<? extends Throwable>> connectionRelated = Lists.<Class<? extends Throwable>>newArrayList(SocketException.class);
 
     public RequestSpecificRetryHandler(boolean okToRetryOnConnectErrors, boolean okToRetryOnAllErrors) {
         this(okToRetryOnConnectErrors, okToRetryOnAllErrors, RetryHandler.DEFAULT, null);    
@@ -50,6 +57,9 @@ public class RequestSpecificRetryHandler implements RetryHandler {
         return Utils.isPresentAsCause(e, connectionRelated);
     }
 
+    /**
+     * 当不开启所有操作重试且在连接异常上重试，当发生 SocketTimeoutException("connecton:refuse") 时不能重试
+     */
     @Override
     public boolean isRetriableException(Throwable e, boolean sameServer) {
         if (okToRetryOnAllErrors) {
